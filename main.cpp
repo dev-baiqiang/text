@@ -45,9 +45,7 @@ typedef struct {
 
 typedef struct {
     GLuint textureId;
-    GLuint vertexBuffer;
-    GLuint indexBuffer;
-    GLuint vertexArray;
+    GLfloat *data;
 } Character;
 
 typedef struct {
@@ -95,6 +93,8 @@ static Glyph *getGlyph(FT_Face *face, uint32_t glyphIndex) {
 static FT_Face face;
 static GLuint program;
 static hb_font_t *hb_font;
+static GLuint VAO, VBO, IBO;
+static constexpr int V_COUNT = 16;
 
 hb_buffer_t *initHB() {
 
@@ -169,20 +169,16 @@ std::vector<Character *> renderText(HBText text, hb_buffer_t *buffer, float x = 
         float y1 = floor(y0 - glyph->height);
         // printf("vertices: %f,%f,%f,%f,%f,%f,%f,%f \n", x0, y0, s0, t0, x1, y1, s1, t1);
 
-        GLfloat vertices[] = {
+        GLfloat vertices[V_COUNT] = {
                 x0, y0, s0, t0,
                 x0, y1, s0, t1,
                 x1, y1, s1, t1,
                 x1, y0, s1, t0
         };
-        GLuint indices[] = {
-                0, 1, 2,
-                0, 2, 3
-        };
 
         Character *c = new Character();
-        glGenVertexArrays(1, &c->vertexArray);
-        glBindVertexArray(c->vertexArray);
+        c->data = new GLfloat[V_COUNT];
+        memcpy(c->data, vertices, sizeof(vertices));
         glGenTextures(1, &c->textureId);
         glBindTexture(GL_TEXTURE_2D, c->textureId);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -191,16 +187,7 @@ std::vector<Character *> renderText(HBText text, hb_buffer_t *buffer, float x = 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, tw, th, 0, GL_RED, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
-        glGenBuffers(1, &c->vertexBuffer);
-        glBindBuffer(GL_ARRAY_BUFFER, c->vertexBuffer);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-        glGenBuffers(1, &c->indexBuffer);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->indexBuffer);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
         glBindTexture(GL_TEXTURE_2D, 0);
-        glBindVertexArray(0);
         cs.push_back(c);
 
         x += xa;
@@ -255,25 +242,43 @@ void initGL() {
                           "res/fs_texture.glsl");
     glUseProgram(program);
     glUniformMatrix4fv(glGetUniformLocation(program, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+
+    GLuint indices[] = {
+            0, 1, 2,
+            0, 2, 3
+    };
+
+    glGenVertexArrays(1, &VAO);
+    glBindVertexArray(VAO);
+    glGenBuffers(1, &VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * V_COUNT, NULL, GL_DYNAMIC_DRAW);
+    glGenBuffers(1, &IBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
 }
 
 void drawText(std::vector<Character *> cs) {
     for (auto c: cs) {
-        glBindVertexArray(c->vertexArray);
         glBindTexture(GL_TEXTURE_2D, c->textureId);
-        glBindBuffer(GL_ARRAY_BUFFER, c->vertexBuffer);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->indexBuffer);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(GLfloat) * V_COUNT, c->data);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 }
 
 void destroyCharacters(std::vector<Character *> cs) {
     for (auto c: cs) {
         glDeleteTextures(1, &c->textureId);
-        glDeleteBuffers(1, &c->indexBuffer);
-        glDeleteBuffers(1, &c->vertexBuffer);
-        glDeleteVertexArrays(1, &c->vertexArray);
+        delete c->data;
         delete c;
     }
 }
@@ -296,8 +301,16 @@ int main() {
             HB_DIRECTION_LTR
     };
 
-    auto cs1 = renderText(text, buffer, 20, 50);
-    auto cs2 = renderText(text2, buffer, 40, 120);
+    HBText text3 = {
+            "现代文本渲染：FreeType",
+            "zh",
+            HB_SCRIPT_HAN,
+            HB_DIRECTION_LTR
+    };
+
+    auto cs1 = renderText(text, buffer, 20, WINDOW_HEIGHT - 50);
+    auto cs2 = renderText(text2, buffer, 40, WINDOW_HEIGHT - 120);
+    auto cs3 = renderText(text3, buffer, 40, WINDOW_HEIGHT - 200);
 
     while (!glfwWindowShouldClose(window)) {
         processInput(window);
@@ -306,6 +319,8 @@ int main() {
         float value = sin(timeValue);
         glUseProgram(program);
         glActiveTexture(GL_TEXTURE0);
+        glBindVertexArray(VAO);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IBO);
 
         glUniform3f(glGetUniformLocation(program, "textColor"), 0, 1.0, value);
         drawText(cs1);
@@ -313,6 +328,11 @@ int main() {
         glUniform3f(glGetUniformLocation(program, "textColor"), 0, value, value);
         drawText(cs2);
 
+        glUniform3f(glGetUniformLocation(program, "textColor"), 0.5, 0, value);
+        drawText(cs3);
+
+        glBindVertexArray(0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         glUseProgram(0);
         glfwSwapBuffers(window);
         glfwPollEvents();
