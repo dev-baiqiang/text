@@ -70,6 +70,7 @@ typedef struct {
     std::string language;
     hb_script_t script;
     hb_direction_t direction;
+    float space;
 } HBText;
 
 static void force_ucs2_charmap(FT_Face ftf) {
@@ -83,28 +84,6 @@ static void force_ucs2_charmap(FT_Face ftf) {
     }
 }
 
-static Glyph *getGlyph(FT_Face *face, uint32_t glyphIndex) {
-    Glyph *g = new Glyph;
-
-    FT_Int32 flags = FT_LOAD_DEFAULT;
-
-    FT_Load_Glyph(*face,
-                  glyphIndex, // the glyph_index in the font file
-                  flags
-    );
-
-    FT_GlyphSlot slot = (*face)->glyph;
-    FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
-
-    FT_Bitmap bitmap = slot->bitmap;
-    g->buffer = bitmap.buffer;
-    g->width = bitmap.width;
-    g->height = bitmap.rows;
-    g->bitmap_left = slot->bitmap_left;
-    g->bitmap_top = slot->bitmap_top;
-    return g;
-}
-
 static FT_Face face;
 static GLuint program;
 static hb_font_t *hb_font;
@@ -112,7 +91,7 @@ static GLuint VAO, VBO;
 static const int FONT_SIZE = 50;
 static const int MAX_WIDTH = 1024;
 
-hb_buffer_t *initHB() {
+void *initHB() {
 
     FT_Library ft;
     if (FT_Init_FreeType(&ft)) {
@@ -124,16 +103,21 @@ hb_buffer_t *initHB() {
         exit(1);
     }
     force_ucs2_charmap(face);
-    FT_Set_Char_Size(face, 0, FONT_SIZE * 64, 72, 0);
-
     hb_font = hb_ft_font_create(face, nullptr);
-    hb_buffer_t *buffer = hb_buffer_create();
-    hb_buffer_allocation_successful(buffer);
-    return buffer;
+    // hb_ft_font_set_funcs(hb_font);
 };
 
-Atlas *renderText(HBText text, hb_buffer_t *buffer, float x = 0, float y = 0) {
+static hb_position_t HBFloatToFixed(float v) {
+    return scalbnf(v, +8);
+}
+
+Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
     auto atlas = new Atlas;
+    FT_Set_Pixel_Sizes(face, 0, size);
+    auto buffer = hb_buffer_create();
+    hb_font_set_ppem(hb_font, size, size);
+    hb_font_set_scale(hb_font, HBFloatToFixed(size),
+                      HBFloatToFixed(size));
     hb_buffer_reset(buffer);
     hb_buffer_set_direction(buffer, text.direction);
     hb_buffer_set_script(buffer, text.script);
@@ -141,13 +125,12 @@ Atlas *renderText(HBText text, hb_buffer_t *buffer, float x = 0, float y = 0) {
     size_t length = text.data.size();
 
     hb_buffer_add_utf8(buffer, text.data.c_str(), length, 0, length);
-
     hb_shape(hb_font, buffer, nullptr, 0);
+
 
     unsigned int glyphCount;
     hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &glyphCount);
     hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(buffer, &glyphCount);
-    auto glyphs = new Glyph *[glyphCount];
 
     int roww = 0;
     int rowh = 0;
@@ -155,23 +138,26 @@ Atlas *renderText(HBText text, hb_buffer_t *buffer, float x = 0, float y = 0) {
     int th = 0;
 
     for (unsigned int i = 0; i < glyphCount; ++i) {
-        hb_glyph_info_t info = infos[i];
-        hb_glyph_position_t pos = positions[i];
 
-        Glyph *glyph = getGlyph(&face, info.codepoint);
-        glyphs[i] = glyph;
-        glyph->ax = (float) pos.x_advance / 64;
-        glyph->ay = (float) pos.y_advance / 64;
-        glyph->ox = (float) pos.x_offset / 64;
-        glyph->oy = (float) pos.y_offset / 64;
-        if (roww + glyph->width + 1 >= MAX_WIDTH) {
+        hb_glyph_info_t info = infos[i];
+        FT_Load_Glyph(face,
+                      info.codepoint,
+                      FT_LOAD_DEFAULT
+        );
+
+        FT_GlyphSlot slot = face->glyph;
+        FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+
+        FT_Bitmap bitmap = slot->bitmap;
+
+        if (roww + bitmap.width + 1 >= MAX_WIDTH) {
             tw = std::max(tw, roww);
             th += rowh;
             roww = 0;
             rowh = 0;
         }
-        roww += glyph->width + 1;
-        rowh = std::max(rowh, glyph->height);
+        roww += bitmap.width + 1;
+        rowh = std::max(rowh, bitmap.rows);
     }
     tw = std::max(tw, roww);
     th += rowh;
@@ -196,33 +182,54 @@ Atlas *renderText(HBText text, hb_buffer_t *buffer, float x = 0, float y = 0) {
     rowh = 0;
     int c = 0;
     atlas->coords = new Point[6 * glyphCount];
+    float letterSpace = text.space;
+    float letterSpaceHalfLeft = letterSpace * 0.5f;
+    float letterSpaceHalfRight = letterSpace - letterSpaceHalfLeft;
+
+    if (glyphCount) {
+        x += letterSpaceHalfLeft;
+    }
     for (unsigned int i = 0; i < glyphCount; ++i) {
-        Glyph *g = glyphs[i];
-        if (ox + g->width + 1 >= MAX_WIDTH) {
+        hb_glyph_info_t info = infos[i];
+        hb_glyph_position_t pos = positions[i];
+
+        FT_Load_Glyph(face,
+                      info.codepoint,
+                      FT_LOAD_DEFAULT
+        );
+
+        FT_GlyphSlot slot = face->glyph;
+        FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+        FT_Bitmap bitmap = slot->bitmap;
+
+        if (ox + bitmap.width + 1 >= MAX_WIDTH) {
             oy += rowh;
             rowh = 0;
             ox = 0;
         }
 
-        glTexSubImage2D(GL_TEXTURE_2D, 0, ox, oy, g->width, g->height, GL_RED, GL_UNSIGNED_BYTE, g->buffer);
-        g->tx = ox / (float) tw;
-        g->ty = oy / (float) th;
-        rowh = std::max(rowh, g->height);
-        ox += g->width + 1;
+        glTexSubImage2D(GL_TEXTURE_2D, 0, ox, oy, bitmap.width, bitmap.rows, GL_RED, GL_UNSIGNED_BYTE, bitmap.buffer);
+        float s0 = ox / (float) tw;
+        float t0 = oy / (float) th;
 
-        float s0 = g->tx;
-        float t0 = g->ty;
-        float s1 = g->tx + float(g->width) / atlas->w;
-        float t1 = g->ty + float(g->height) / atlas->h;
-        float x0 = x + g->bitmap_left;
-        float y0 = floor(y + g->bitmap_top);
-        float x1 = x0 + g->width;
-        float y1 = floor(y0 - g->height);
+        float xa = (float) pos.x_advance / 64;
+        float ya = (float) pos.y_advance / 64;
+        float xo = (float) pos.x_offset / 64;
+        float yo = (float) pos.y_offset / 64;
 
-        printf("vertices: %f,%f,%f,%f,%f,%f,%f,%f,%d \n", x0, y0, x1, y1, s0, t0, s1, t1, g->width);
+        float s1 = s0 + float(bitmap.width) / atlas->w;
+        float t1 = t0 + float(bitmap.rows) / atlas->h;
+        float x0 = x + slot->bitmap_left;
+        float y0 = floor(y + slot->bitmap_top);
+        float x1 = x0 + bitmap.width;
+        float y1 = floor(y0 - bitmap.rows);
 
-        x += g->ax;
-        y += g->ay;
+        // printf("vertices: %f,%f,%f,%f,%f,%f,%f,%f,%d \n", x0, y0, x1, y1, s0, t0, s1, t1, bitmap.width);
+
+        rowh = std::max(rowh, bitmap.rows);
+        ox += bitmap.width + 1;
+        x += xa + letterSpace;
+        y += ya;
 
         atlas->coords[c++] = {
                 x0, y0, s0, t0
@@ -243,12 +250,15 @@ Atlas *renderText(HBText text, hb_buffer_t *buffer, float x = 0, float y = 0) {
                 x1, y0, s1, t0
         };
     }
+    if (glyphCount) {
+        x += letterSpaceHalfRight;
+    }
     atlas->count = c;
 
-    printf("atlas: %d, %d, %d, %d \n", atlas->w, atlas->h, atlas->count, c);
+    printf("atlas: %d, %d, %d, %d, %f \n", atlas->w, atlas->h, atlas->count, c, x);
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    delete[] glyphs;
+    hb_buffer_destroy(buffer);
     return atlas;
 }
 
@@ -257,7 +267,7 @@ GLFWwindow *initWindow() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_SAMPLES, 16);
+    glfwWindowHint(GLFW_SAMPLES, 1);
     GLFWwindow *window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "LearnOpenGL", nullptr, nullptr);
     if (window == nullptr) {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -321,11 +331,11 @@ void drawText(Atlas *atlas) {
 int main() {
     GLFWwindow *window = initWindow();
     initGL();
-    hb_buffer_t *buffer = initHB();
-    HBText text = {
-            "How",
-            "en",
-            HB_SCRIPT_LATIN,
+    initHB();
+    HBText text1 = {
+            "Single Texture",
+            "zh",
+            HB_SCRIPT_HAN,
             HB_DIRECTION_LTR
     };
 
@@ -333,17 +343,21 @@ int main() {
             "How to render text",
             "en",
             HB_SCRIPT_LATIN,
-            HB_DIRECTION_LTR
+            HB_DIRECTION_LTR,
+            8.0f
     };
 
     HBText text3 = {
             "现代文本渲染：FreeType",
             "zh",
             HB_SCRIPT_HAN,
-            HB_DIRECTION_LTR
+            HB_DIRECTION_LTR,
+            1.2f
     };
 
-    auto cs1 = renderText(text, buffer, 20, WINDOW_HEIGHT - 50);
+    auto a1 = renderText(text1, 30, 20, WINDOW_HEIGHT - 50);
+    auto a2 = renderText(text2, 40, 20, WINDOW_HEIGHT - 200);
+    auto a3 = renderText(text3, 50, 20, WINDOW_HEIGHT - 350);
 
     while (!glfwWindowShouldClose(window)) {
         processInput(window);
@@ -355,11 +369,13 @@ int main() {
         glBindVertexArray(VAO);
 
         glUniform3f(glGetUniformLocation(program, "textColor"), 0, 1.0, value);
-        drawText(cs1);
+        drawText(a1);
 
         glUniform3f(glGetUniformLocation(program, "textColor"), 0, value, value);
+        drawText(a2);
 
         glUniform3f(glGetUniformLocation(program, "textColor"), 0.5, 0, value);
+        drawText(a3);
 
         glBindVertexArray(0);
         glUseProgram(0);
@@ -369,7 +385,6 @@ int main() {
 
     glDeleteProgram(program);
     FT_Done_Face(face);
-    hb_buffer_destroy(buffer);
     hb_font_destroy(hb_font);
     glfwTerminate();
     return 0;
