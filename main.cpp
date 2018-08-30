@@ -189,6 +189,11 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
     if (glyphCount) {
         x += letterSpaceHalfLeft;
     }
+    float sx = 1.0f / WINDOW_WIDTH;
+    float sy = 1.0f / WINDOW_HEIGHT;
+    x *= sx;
+    y *= sy;
+
     for (unsigned int i = 0; i < glyphCount; ++i) {
         hb_glyph_info_t info = infos[i];
         hb_glyph_position_t pos = positions[i];
@@ -219,17 +224,17 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
 
         float s1 = s0 + float(bitmap.width) / atlas->w;
         float t1 = t0 + float(bitmap.rows) / atlas->h;
-        float x0 = x + slot->bitmap_left;
-        float y0 = floor(y + slot->bitmap_top);
-        float x1 = x0 + bitmap.width;
-        float y1 = floor(y0 - bitmap.rows);
+        float x0 = x + slot->bitmap_left * sx;;
+        float y0 = floor(y + slot->bitmap_top * sx);
+        float x1 = x0 + bitmap.width * sx;
+        float y1 = floor(y0 - bitmap.rows * sy);
 
         // printf("vertices: %f,%f,%f,%f,%f,%f,%f,%f,%d \n", x0, y0, x1, y1, s0, t0, s1, t1, bitmap.width);
 
         rowh = std::max(rowh, bitmap.rows);
         ox += bitmap.width + 1;
-        x += xa + letterSpace;
-        y += ya;
+        x += (xa + letterSpace) * sx;
+        y += ya * sy;;
 
         atlas->coords[c++] = {
                 x0, y0, s0, t0
@@ -301,13 +306,9 @@ void initGL() {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
-    glm::mat4 projection = glm::ortho(0.0f, static_cast<GLfloat>(WINDOW_WIDTH), 0.0f,
-                                      static_cast<GLfloat>(WINDOW_HEIGHT));
-
     program = shader_load("res/vs_texture.glsl",
                           "res/fs_texture.glsl");
     glUseProgram(program);
-    glUniformMatrix4fv(glGetUniformLocation(program, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
     glGenVertexArrays(1, &VAO);
     glBindVertexArray(VAO);
@@ -332,20 +333,6 @@ int main() {
     GLFWwindow *window = initWindow();
     initGL();
     initHB();
-    HBText text1 = {
-            "Single Texture",
-            "zh",
-            HB_SCRIPT_HAN,
-            HB_DIRECTION_LTR
-    };
-
-    HBText text2 = {
-            "How to render text",
-            "en",
-            HB_SCRIPT_LATIN,
-            HB_DIRECTION_LTR,
-            8.0f
-    };
 
     HBText text3 = {
             "现代文本渲染：FreeType",
@@ -355,8 +342,6 @@ int main() {
             1.2f
     };
 
-    auto a1 = renderText(text1, 30, 20, WINDOW_HEIGHT - 50);
-    auto a2 = renderText(text2, 40, 20, WINDOW_HEIGHT - 200);
     auto a3 = renderText(text3, 50, 20, WINDOW_HEIGHT - 350);
 
     while (!glfwWindowShouldClose(window)) {
@@ -365,14 +350,23 @@ int main() {
         float timeValue = glfwGetTime();
         float value = sin(timeValue);
         glUseProgram(program);
+
+        glm::mat4 model;
+        glm::mat4 view;
+        glm::mat4 projection;
+        model = glm::rotate(model, glm::radians(-55.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.1f));
+        projection = glm::perspective(glm::radians(45.0f), (float) WINDOW_WIDTH / (float) WINDOW_HEIGHT, 0.1f, 200.0f);
+        // retrieve the matrix uniform locations
+        unsigned int modelLoc = glGetUniformLocation(program, "model");
+        unsigned int viewLoc = glGetUniformLocation(program, "view");
+        unsigned int projectionLoc = glGetUniformLocation(program, "projection");
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, &view[0][0]);
+        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, &projection[0][0]);
+
         glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(VAO);
-
-        glUniform3f(glGetUniformLocation(program, "textColor"), 0, 1.0, value);
-        drawText(a1);
-
-        glUniform3f(glGetUniformLocation(program, "textColor"), 0, value, value);
-        drawText(a2);
 
         glUniform3f(glGetUniformLocation(program, "textColor"), 0.5, 0, value);
         drawText(a3);
