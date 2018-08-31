@@ -36,20 +36,6 @@ static void processInput(GLFWwindow *window) {
     }
 }
 
-typedef struct {
-    unsigned char *buffer;
-    int width;
-    int height;
-    float bitmap_left;
-    float bitmap_top;
-    float ax;
-    float ay;
-    float tx;
-    float ty;
-    float ox;
-    float oy;
-} Glyph;
-
 struct Point {
     GLfloat x;
     GLfloat y;
@@ -61,8 +47,10 @@ typedef struct {
     GLuint texture1;
     int w;
     int h;
-    Point *coords;
-    int count;
+    Point *vertices;
+    GLuint *indices;
+    int vc;
+    int ic;
 } Atlas;
 
 typedef struct {
@@ -87,7 +75,7 @@ static void force_ucs2_charmap(FT_Face ftf) {
 static FT_Face face;
 static GLuint program;
 static hb_font_t *hb_font;
-static GLuint VAO, VBO;
+static GLuint VAO, VBO, IBO;
 static const int FONT_SIZE = 50;
 static const int MAX_WIDTH = 1024;
 
@@ -180,8 +168,10 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
     int ox = 0;
     int oy = 0;
     rowh = 0;
-    int c = 0;
-    atlas->coords = new Point[6 * glyphCount];
+    int ic = 0;
+    int vc = 0;
+    atlas->vertices = new Point[4 * glyphCount];
+    atlas->indices = new GLuint[6 * glyphCount];
     float letterSpace = text.space;
     float letterSpaceHalfLeft = letterSpace * 0.5f;
     float letterSpaceHalfRight = letterSpace - letterSpaceHalfLeft;
@@ -214,8 +204,8 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
 
         float xa = (float) pos.x_advance / 64;
         float ya = (float) pos.y_advance / 64;
-        float xo = (float) pos.x_offset / 64;
-        float yo = (float) pos.y_offset / 64;
+        // float xo = (float) pos.x_offset / 64;
+        // float yo = (float) pos.y_offset / 64;
 
         float s1 = s0 + float(bitmap.width) / atlas->w;
         float t1 = t0 + float(bitmap.rows) / atlas->h;
@@ -230,32 +220,35 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
         ox += bitmap.width + 1;
         x += xa + letterSpace;
         y += ya;
+        GLuint index = i * 4;
 
-        atlas->coords[c++] = {
+        atlas->vertices[vc++] = {
                 x0, y0, s0, t0
         };
-        atlas->coords[c++] = {
+        atlas->vertices[vc++] = {
                 x0, y1, s0, t1
         };
-        atlas->coords[c++] = {
+        atlas->vertices[vc++] = {
                 x1, y1, s1, t1
         };
-        atlas->coords[c++] = {
-                x0, y0, s0, t0
-        };
-        atlas->coords[c++] = {
-                x1, y1, s1, t1
-        };
-        atlas->coords[c++] = {
+        atlas->vertices[vc++] = {
                 x1, y0, s1, t0
         };
+
+        atlas->indices[ic++] = index;
+        atlas->indices[ic++] = index + 1;
+        atlas->indices[ic++] = index + 2;
+        atlas->indices[ic++] = index;
+        atlas->indices[ic++] = index + 2;
+        atlas->indices[ic++] = index + 3;
     }
     if (glyphCount) {
         x += letterSpaceHalfRight;
     }
-    atlas->count = c;
+    atlas->vc = vc;
+    atlas->ic = ic;
 
-    printf("atlas: %d, %d, %d, %d, %f \n", atlas->w, atlas->h, atlas->count, c, x);
+    printf("atlas: %d, %d, %d, %d, %f \n", atlas->w, atlas->h, atlas->vc, ic, x);
 
     glBindTexture(GL_TEXTURE_2D, 0);
     hb_buffer_destroy(buffer);
@@ -312,6 +305,7 @@ void initGL() {
     glGenVertexArrays(1, &VAO);
     glBindVertexArray(VAO);
     glGenBuffers(1, &VBO);
+    glGenBuffers(1, &IBO);
     glBindVertexArray(0);
 }
 
@@ -321,11 +315,21 @@ void drawText(Atlas *atlas) {
     glEnableVertexAttribArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), nullptr);
-    glBufferData(GL_ARRAY_BUFFER, atlas->count * 4 * sizeof(GLfloat), atlas->coords, GL_STATIC_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, atlas->count);
+    glBufferData(GL_ARRAY_BUFFER, atlas->vc * 4 * sizeof(GLfloat), atlas->vertices, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, atlas->ic * sizeof(GLfloat), atlas->indices, GL_DYNAMIC_DRAW);
+    glDrawElements(GL_TRIANGLES, atlas->ic, GL_UNSIGNED_INT, nullptr);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindVertexArray(0);
+}
+
+void destroyAtlas(Atlas *a) {
+    glDeleteTextures(1, &a->texture1);
+    delete[] a->indices;
+    delete[] a->vertices;
+    delete a;
 }
 
 int main() {
@@ -366,7 +370,6 @@ int main() {
         float value = sin(timeValue);
         glUseProgram(program);
         glActiveTexture(GL_TEXTURE0);
-        glBindVertexArray(VAO);
 
         glUniform3f(glGetUniformLocation(program, "textColor"), 0, 1.0, value);
         drawText(a1);
@@ -377,12 +380,16 @@ int main() {
         glUniform3f(glGetUniformLocation(program, "textColor"), 0.5, 0, value);
         drawText(a3);
 
-        glBindVertexArray(0);
         glUseProgram(0);
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-
+    destroyAtlas(a1);
+    destroyAtlas(a2);
+    destroyAtlas(a3);
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &IBO);
     glDeleteProgram(program);
     FT_Done_Face(face);
     hb_font_destroy(hb_font);
