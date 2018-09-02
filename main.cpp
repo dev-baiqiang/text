@@ -21,6 +21,7 @@
 
 const unsigned int WINDOW_WIDTH = 800;
 const unsigned int WINDOW_HEIGHT = 600;
+static int shot = 0;
 
 static void onSizeChange(GLFWwindow *window, int width, int height) {
     glViewport(0, 0, width, height);
@@ -29,10 +30,8 @@ static void onSizeChange(GLFWwindow *window, int width, int height) {
 static void processInput(GLFWwindow *window) {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, true);
-    } else if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS) {
-        screenshot(window, "screenshot.tga");
-        std::cout << "screenshot!!!" << std::endl;
-        glfwSetWindowShouldClose(window, true);
+    } else if (glfwGetKey(window, GLFW_KEY_F5) == GLFW_PRESS) {
+        shot = 1;
     }
 }
 
@@ -77,6 +76,7 @@ static GLuint program;
 static hb_font_t *hb_font;
 static GLuint VAO, VBO, IBO;
 static const int MAX_WIDTH = 1024;
+static const char CHAR_NEW_LINE = '\n';
 
 void *initHB() {
 
@@ -98,7 +98,11 @@ static hb_position_t HBFloatToFixed(float v) {
     return scalbnf(v, +8);
 }
 
-Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
+static inline bool IsNewlineSegment(const std::string &text, int index) {
+    return text[index] == CHAR_NEW_LINE;
+}
+
+Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0, float lineHeight = 1.0f) {
     auto atlas = new Atlas;
     FT_Set_Pixel_Sizes(face, 0, size);
     auto buffer = hb_buffer_create();
@@ -123,6 +127,7 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
     unsigned int rowh = 0;
     unsigned int tw = 0;
     unsigned int th = 0;
+    float rx = x;
 
     for (unsigned int i = 0; i < glyphCount; ++i) {
 
@@ -217,9 +222,13 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
 
         rowh = std::max(rowh, bitmap.rows);
         ox += bitmap.width + 1;
-        x += xa + letterSpace;
-        y += ya;
-        GLuint index = i * 4;
+        if (IsNewlineSegment(text.data, i)) {
+            x = rx + letterSpaceHalfLeft;
+            y -= ya + lineHeight * size;
+        } else {
+            x += xa + letterSpace;
+            y -= ya;
+        }
 
         atlas->vertices[vc++] = {
                 x0, y0, s0, t0
@@ -234,6 +243,7 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
                 x1, y0, s1, t0
         };
 
+        GLuint index = i * 4;
         atlas->indices[ic++] = index;
         atlas->indices[ic++] = index + 1;
         atlas->indices[ic++] = index + 2;
@@ -252,6 +262,13 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
     glBindTexture(GL_TEXTURE_2D, 0);
     hb_buffer_destroy(buffer);
     return atlas;
+}
+
+void onInputText(GLFWwindow *window, unsigned int codepoint, int mods) {
+    std::cout << codepoint << " : " << mods << std::endl;
+    if (mods == 1) {
+        std::cout << "Shift key pressed aswell" << std::endl;
+    }
 }
 
 GLFWwindow *initWindow() {
@@ -276,6 +293,7 @@ GLFWwindow *initWindow() {
     stbi_image_free(data);
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, onSizeChange);
+    glfwSetCharModsCallback(window, onInputText);
     if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
         std::cout << "Failed to initialize GLAD" << std::endl;
         glfwTerminate();
@@ -335,10 +353,18 @@ int main() {
     GLFWwindow *window = initWindow();
     initGL();
     initHB();
+
+    HBText text0 = {
+            "1.2 Line\nHeight",
+            "en",
+            HB_SCRIPT_LATIN,
+            HB_DIRECTION_LTR
+    };
+
     HBText text1 = {
-            "Single Texture",
-            "zh",
-            HB_SCRIPT_HAN,
+            "Single\nTexture",
+            "en",
+            HB_SCRIPT_LATIN,
             HB_DIRECTION_LTR
     };
 
@@ -361,9 +387,11 @@ int main() {
     auto a1 = renderText(text1, 30, 20, WINDOW_HEIGHT - 50);
     auto a2 = renderText(text2, 40, 20, WINDOW_HEIGHT - 200);
     auto a3 = renderText(text3, 50, 20, WINDOW_HEIGHT - 350);
+    auto a4 = renderText(text0, 30, 20, WINDOW_HEIGHT - 450, 1.2f);
 
     while (!glfwWindowShouldClose(window)) {
         processInput(window);
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         float timeValue = glfwGetTime();
         float value = sin(timeValue);
@@ -379,7 +407,15 @@ int main() {
         glUniform3f(glGetUniformLocation(program, "textColor"), 0.5, 0, value);
         drawText(a3);
 
+        glUniform3f(glGetUniformLocation(program, "textColor"), 0, 0, value);
+        drawText(a4);
+
         glUseProgram(0);
+
+        if (shot) {
+            shot = 0;
+            saveScreenShot(window, "screenshot.bmp");
+        }
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -395,3 +431,4 @@ int main() {
     glfwTerminate();
     return 0;
 }
+

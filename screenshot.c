@@ -3,12 +3,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "screenshot.h"
-
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 void screenshot(GLFWwindow *window, const char *path) {
     int width, height;
 
-    FILE* out = fopen(path, "wb");
+    FILE *out = fopen(path, "wb");
 
     glfwGetWindowSize(window, &width, &height);
 
@@ -30,5 +31,15 @@ void screenshot(GLFWwindow *window, const char *path) {
     fwrite(buffer, sizeof(uint8_t), width * height * 3, out);
 
     fclose(out);
+    free(buffer);
+}
+
+void saveScreenShot(GLFWwindow *window, const char *path) {
+    int width, height;
+    stbi_flip_vertically_on_write(1);
+    glfwGetWindowSize(window, &width, &height);
+    uint8_t *buffer = (uint8_t *) calloc(width * height * 3, sizeof(uint8_t));
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+    stbi_write_bmp(path, width, height, 3, buffer);
     free(buffer);
 }

@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 
 set(SOURCE_FILES
-        shadow.cpp
+        main.cpp
         shader.c
         screenshot.c)
 
@@ -40,7 +40,7 @@ set(GLFW_BUILD_TESTS OFF CACHE INTERNAL "Build the GLFW test programs")
 set(GLFW_BUILD_DOCS OFF CACHE INTERNAL "Build the GLFW documentation")
 set(GLFW_INSTALL ON CACHE INTERNAL "Generate installation target")
 add_subdirectory("${GLFW_DIR}")
-target_link_libraries(${PROJECT_NAME} "glfw" "${GLFW_LIBRARIES}")
+target_link_libraries(${PROJECT_NAME} "glfw")
 target_include_directories(${PROJECT_NAME} PRIVATE "${GLFW_DIR}/include")
 target_compile_definitions(${PROJECT_NAME} PRIVATE "GLFW_INCLUDE_NONE")
 

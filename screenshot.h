@@ -12,6 +12,8 @@ extern "C" {
 
 void screenshot(GLFWwindow *window, const char *path);
 
+void saveScreenShot(GLFWwindow *window, const char *path);
+
 #endif
 
 #ifdef __cplusplus
