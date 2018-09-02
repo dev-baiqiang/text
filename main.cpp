@@ -8,12 +8,12 @@
 #include "shader.h"
 
 #include <vector>
-#include "harfbuzz/hb-icu.h"
-#include "harfbuzz/hb-ft.h"
+#include "hb-icu.h"
+#include "hb-ft.h"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
+#include <glm.hpp>
+#include <gtc/matrix_transform.hpp>
+#include <gtc/type_ptr.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 
@@ -76,7 +76,6 @@ static FT_Face face;
 static GLuint program;
 static hb_font_t *hb_font;
 static GLuint VAO, VBO, IBO;
-static const int FONT_SIZE = 50;
 static const int MAX_WIDTH = 1024;
 
 void *initHB() {
@@ -120,10 +119,10 @@ Atlas *renderText(HBText text, unsigned int size, float x = 0, float y = 0) {
     hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &glyphCount);
     hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(buffer, &glyphCount);
 
-    int roww = 0;
-    int rowh = 0;
-    int tw = 0;
-    int th = 0;
+    unsigned int roww = 0;
+    unsigned int rowh = 0;
+    unsigned int tw = 0;
+    unsigned int th = 0;
 
     for (unsigned int i = 0; i < glyphCount; ++i) {
 
@@ -396,4 +395,3 @@ int main() {
     glfwTerminate();
     return 0;
 }
-
